@@ -19,6 +19,10 @@
 (define-constant ERR_STORY_CURRENTLY_PAUSED (err u108))
 (define-constant ERR_INVALID_VOTING_DURATION (err u109))
 (define-constant ERR_STORY_ALREADY_COMPLETED (err u110))
+(define-constant ERR_INVALID_INPUT (err u111))
+(define-constant ERR_NFT_MINT_FAILED (err u112))
+(define-constant ERR_INVALID_DECISION (err u113))
+(define-constant ERR_INVALID_ADDRESS (err u114))
 
 ;; Data Maps
 (define-map story_details
@@ -97,32 +101,56 @@
   )
 )
 
+(define-private (is-valid-string (input (string-ascii 100)))
+  (< u0 (len input))
+)
+
+(define-private (is-valid-story-id (story-identifier uint))
+  (is-some (map-get? story_details { story-identifier: story-identifier }))
+)
+
+(define-private (is-valid-decision (story-identifier uint) (decision-number uint))
+  (is-some (map-get? story_plot_decisions { story-identifier: story-identifier, decision-number: decision-number }))
+)
+
+(define-private (is-valid-principal (address principal))
+  (and 
+    (not (is-eq address CONTRACT_OWNER))  ;; Prevent registering contract owner as contributor
+    (not (is-eq address (as-contract tx-sender)))  ;; Prevent registering contract itself
+    true
+  )
+)
+
 ;; Public Functions
 (define-public (create-new-story (story-title (string-ascii 100)) (story-category (string-ascii 20)))
   (let
     (
       (new-story-identifier (+ (var-get story_counter) u1))
     )
-    (try! (nft-mint? story_ownership_token new-story-identifier tx-sender))
-    (map-set story_details 
-      { story-identifier: new-story-identifier }
-      {
-        story-title: story-title,
-        chapter-count: u0,
-        completion-status: false,
-        pause-status: false,
-        creation-timestamp: block-height,
-        story-category: story-category,
-        story-owner: tx-sender
-      }
-    )
-    (map-set story_contributor_registry
-      { story-identifier: new-story-identifier, contributor-address: tx-sender }
-      { contributor-role: "owner", join-timestamp: block-height }
-    )
-    (var-set story_counter new-story-identifier)
-    (emit-story-event "story-created" new-story-identifier)
-    (ok new-story-identifier)
+    (asserts! (is-valid-string story-title) (err ERR_INVALID_INPUT))
+    (asserts! (is-valid-string story-category) (err ERR_INVALID_INPUT))
+    (match (nft-mint? story_ownership_token new-story-identifier tx-sender)
+      success (begin
+        (map-set story_details 
+          { story-identifier: new-story-identifier }
+          {
+            story-title: story-title,
+            chapter-count: u0,
+            completion-status: false,
+            pause-status: false,
+            creation-timestamp: block-height,
+            story-category: story-category,
+            story-owner: tx-sender
+          }
+        )
+        (map-set story_contributor_registry
+          { story-identifier: new-story-identifier, contributor-address: tx-sender }
+          { contributor-role: "owner", join-timestamp: block-height }
+        )
+        (var-set story_counter new-story-identifier)
+        (emit-story-event "story-created" new-story-identifier)
+        (ok new-story-identifier))
+      error (err ERR_NFT_MINT_FAILED))
   )
 )
 
@@ -136,6 +164,9 @@
       (story-data (unwrap! (map-get? story_details { story-identifier: story-identifier }) (err ERR_STORY_NOT_FOUND)))
       (next-chapter-number (+ (get chapter-count story-data) u1))
     )
+    (asserts! (is-valid-story-id story-identifier) (err ERR_STORY_NOT_FOUND))
+    (asserts! (is-valid-string chapter-title) (err ERR_INVALID_INPUT))
+    (asserts! (> (len chapter-text) u0) (err ERR_INVALID_INPUT))
     (asserts! (has-contributor-rights story-identifier) (err ERR_NOT_STORY_CONTRIBUTOR))
     (asserts! (not (get completion-status story-data)) (err ERR_STORY_ALREADY_COMPLETED))
     (asserts! (not (get pause-status story-data)) (err ERR_STORY_CURRENTLY_PAUSED))
@@ -169,6 +200,9 @@
       (story-data (unwrap! (map-get? story_details { story-identifier: story-identifier }) (err ERR_STORY_NOT_FOUND)))
       (new-decision-number (+ (var-get plot_decision_counter) u1))
     )
+    (asserts! (is-valid-story-id story-identifier) (err ERR_STORY_NOT_FOUND))
+    (asserts! (is-valid-string first-option) (err ERR_INVALID_INPUT))
+    (asserts! (is-valid-string second-option) (err ERR_INVALID_INPUT))
     (asserts! (has-contributor-rights story-identifier) (err ERR_NOT_STORY_CONTRIBUTOR))
     (asserts! (not (get completion-status story-data)) (err ERR_STORY_ALREADY_COMPLETED))
     (asserts! (not (get pause-status story-data)) (err ERR_STORY_CURRENTLY_PAUSED))
@@ -202,6 +236,8 @@
                          decision-number: decision-number, 
                          voter-address: tx-sender })
     )
+    (asserts! (is-valid-story-id story-identifier) (err ERR_STORY_NOT_FOUND))
+    (asserts! (is-valid-decision story-identifier decision-number) (err ERR_INVALID_DECISION))
     (asserts! (get voting-active decision-data) (err ERR_VOTING_PERIOD_ENDED))
     (asserts! (<= block-height (get voting-deadline decision-data)) (err ERR_VOTING_PERIOD_ENDED))
     (asserts! (or (is-eq selected-option u0) (is-eq selected-option u1)) (err ERR_INVALID_VOTE_OPTION))
@@ -236,6 +272,7 @@
     (
       (story-data (unwrap! (map-get? story_details { story-identifier: story-identifier }) (err ERR_STORY_NOT_FOUND)))
     )
+    (asserts! (is-valid-story-id story-identifier) (err ERR_STORY_NOT_FOUND))
     (asserts! (or (is-contract-owner) (is-story-owner story-identifier)) (err ERR_UNAUTHORIZED_ACCESS))
     (ok (map-set story_details { story-identifier: story-identifier }
       (merge story-data { pause-status: true })))
@@ -247,6 +284,7 @@
     (
       (story-data (unwrap! (map-get? story_details { story-identifier: story-identifier }) (err ERR_STORY_NOT_FOUND)))
     )
+    (asserts! (is-valid-story-id story-identifier) (err ERR_STORY_NOT_FOUND))
     (asserts! (or (is-contract-owner) (is-story-owner story-identifier)) (err ERR_UNAUTHORIZED_ACCESS))
     (ok (map-set story_details { story-identifier: story-identifier }
       (merge story-data { pause-status: false })))
@@ -258,6 +296,9 @@
     (
       (story-data (unwrap! (map-get? story_details { story-identifier: story-identifier }) (err ERR_STORY_NOT_FOUND)))
     )
+    (asserts! (is-valid-story-id story-identifier) (err ERR_STORY_NOT_FOUND))
+    (asserts! (is-valid-string contributor-role) (err ERR_INVALID_INPUT))
+    (asserts! (is-valid-principal contributor-address) (err ERR_INVALID_ADDRESS))
     (asserts! (or (is-contract-owner) (is-story-owner story-identifier)) (err ERR_UNAUTHORIZED_ACCESS))
     (ok (map-set story_contributor_registry
       { story-identifier: story-identifier, contributor-address: contributor-address }
@@ -270,6 +311,7 @@
     (
       (story-data (unwrap! (map-get? story_details { story-identifier: story-identifier }) (err ERR_STORY_NOT_FOUND)))
     )
+    (asserts! (is-valid-story-id story-identifier) (err ERR_STORY_NOT_FOUND))
     (asserts! (or (is-contract-owner) (is-story-owner story-identifier)) (err ERR_UNAUTHORIZED_ACCESS))
     (emit-story-event "story-completed" story-identifier)
     (ok (map-set story_details { story-identifier: story-identifier }
