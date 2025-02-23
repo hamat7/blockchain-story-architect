@@ -74,8 +74,8 @@
 (define-data-var plot_decision_counter uint u0)
 
 ;; Events
-(define-public (emit-story-event (event-name (string-ascii 20)) (story-identifier uint))
-  (ok (print { event-name: event-name, story-identifier: story-identifier, block-timestamp: block-height }))
+(define-private (emit-story-event (event-name (string-ascii 20)) (story-identifier uint))
+  (print { event-name: event-name, story-identifier: story-identifier, block-timestamp: block-height })
 )
 
 ;; Private Functions
@@ -90,9 +90,10 @@
 )
 
 (define-private (has-contributor-rights (story-identifier uint))
-  (match (map-get? story_contributor_registry { story-identifier: story-identifier, contributor-address: tx-sender })
+  (match (map-get? story_contributor_registry 
+         { story-identifier: story-identifier, contributor-address: tx-sender })
     contributor-data true
-    false false
+    false
   )
 )
 
@@ -120,7 +121,7 @@
       { contributor-role: "owner", join-timestamp: block-height }
     )
     (var-set story_counter new-story-identifier)
-    (try! (emit-story-event "story-created" new-story-identifier))
+    (emit-story-event "story-created" new-story-identifier)
     (ok new-story-identifier)
   )
 )
@@ -152,7 +153,7 @@
     (map-set story_details { story-identifier: story-identifier }
       (merge story-data { chapter-count: next-chapter-number }))
     
-    (try! (emit-story-event "chapter-added" story-identifier))
+    (emit-story-event "chapter-added" story-identifier)
     (ok next-chapter-number)
   )
 )
@@ -185,7 +186,7 @@
       }
     )
     (var-set plot_decision_counter new-decision-number)
-    (try! (emit-story-event "decision-created" story-identifier))
+    (emit-story-event "decision-created" story-identifier)
     (ok new-decision-number)
   )
 )
@@ -225,7 +226,7 @@
       })
     )
     
-    (try! (emit-story-event "vote-recorded" story-identifier))
+    (emit-story-event "vote-recorded" story-identifier)
     (ok true)
   )
 )
@@ -270,7 +271,7 @@
       (story-data (unwrap! (map-get? story_details { story-identifier: story-identifier }) (err ERR_STORY_NOT_FOUND)))
     )
     (asserts! (or (is-contract-owner) (is-story-owner story-identifier)) (err ERR_UNAUTHORIZED_ACCESS))
-    (try! (emit-story-event "story-completed" story-identifier))
+    (emit-story-event "story-completed" story-identifier)
     (ok (map-set story_details { story-identifier: story-identifier }
       (merge story-data { completion-status: true })))
   )
